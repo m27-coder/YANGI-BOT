@@ -17,19 +17,26 @@ const adminId = process.env.ADMIN_CHAT_ID;
 
 // Token tekshiruv
 if (!token || token === 'Ushbu_joyga_bot_tokenni_yozing') {
-    console.error("Xatolik: BOT_TOKEN ko'rsatilmagan! Iltimos, Render-da Environment Variables bo'limini tekshiring.");
-    // Processni to'xtatmaymiz, tokim Render serverni "failed" deb o'chirmasin, 
-    // biz loglarni ko'ra olishimiz kerak.
+    console.error("🔴 XATOLIK: BOT_TOKEN topilmadi! Render Dashboard-da Environment Variables bo'limini sozlang.");
+}
+
+// Botni yaratish (Token bo'lmasa xato bermasligi uchun tekshiruv bilan)
+const bot = token && token !== 'Ushbu_joyga_bot_tokenni_yozing' ? new Telegraf(token) : null;
+
+if (!bot) {
+    console.error("⚠️ Bot obyekti yaratilmadi. Tokenni tekshiring!");
 }
 
 // Kichik anti-spam filtri uchun (xotirada)
 const lastMessageMap = new Map();
 
-// Boshlang'ich buyruq: /start yuborilganda
-bot.start(async (ctx) => {
-    const isFromAdmin = ctx.chat.id.toString() === adminId;
+// Faqat bot mavjud bo'lsa buyruqlarni o'rnatamiz
+if (bot) {
+    // Boshlang'ich buyruq: /start yuborilganda
+    bot.start(async (ctx) => {
+        const isFromAdmin = ctx.chat.id.toString() === adminId;
 
-    if (!isFromAdmin) {
+        if (!isFromAdmin) {
         // Yangi kirgan foydalanuvchi profilini adminga darhol yuborish
         const userName = ctx.from.username ? `@${ctx.from.username}` : `Yo'q`;
         const firstName = ctx.from.first_name || "Mavjud Emas";
@@ -183,5 +190,6 @@ bot.launch().then(() => {
 });
 
 // Xavfsiz o'chirish jarayonlari
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    process.once('SIGINT', () => bot.stop('SIGINT'));
+    process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}
