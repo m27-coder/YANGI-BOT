@@ -1,27 +1,26 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
+const http = require('http');
+
+// --- RENDER.COM HEALTH CHECK SERVER ---
+// Bu qism har doim eng tepada bo'lishi kerak, tokim Render portni tezroq aniqlasin
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is running...\n');
+}).listen(PORT, '0.0.0.0', () => {
+    console.log(`📡 Health-check server port ${PORT} da (0.0.0.0) ishga tushdi.`);
+});
 
 const token = process.env.BOT_TOKEN;
 const adminId = process.env.ADMIN_CHAT_ID;
 
 // Token tekshiruv
 if (!token || token === 'Ushbu_joyga_bot_tokenni_yozing') {
-    console.error("Xatolik: BOT_TOKEN ko'rsatilmagan! Iltimos, .env faylini to'g'rilang.");
-    process.exit(1);
+    console.error("Xatolik: BOT_TOKEN ko'rsatilmagan! Iltimos, Render-da Environment Variables bo'limini tekshiring.");
+    // Processni to'xtatmaymiz, tokim Render serverni "failed" deb o'chirmasin, 
+    // biz loglarni ko'ra olishimiz kerak.
 }
-
-const bot = new Telegraf(token);
-
-// --- RENDER.COM HEALTH CHECK SERVER ---
-// Render bepul tarifida bot o'chib qolmasligi uchun portni tinglash kerak
-const http = require('http');
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is running...\n');
-}).listen(PORT, () => {
-    console.log(`📡 Health-check server port ${PORT} da ishga tushdi.`);
-});
 
 // Kichik anti-spam filtri uchun (xotirada)
 const lastMessageMap = new Map();
