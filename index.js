@@ -12,8 +12,13 @@ http.createServer((req, res) => {
     console.log(`📡 Health-check server port ${PORT} da (0.0.0.0) ishga tushdi.`);
 });
 
+console.log("🎬 Bot ishga tushishni boshladi...");
+
 const token = process.env.BOT_TOKEN;
 const adminId = process.env.ADMIN_CHAT_ID;
+
+// Admin ID ni tekshirish (faqat raqamlardan iborat bo'lishi kerak)
+const isValidAdminId = adminId && /^\d+$/.test(adminId);
 
 // Token tekshiruv
 if (!token || token === 'Ushbu_joyga_bot_tokenni_yozing') {
@@ -24,7 +29,7 @@ if (!token || token === 'Ushbu_joyga_bot_tokenni_yozing') {
 const bot = token && token !== 'Ushbu_joyga_bot_tokenni_yozing' ? new Telegraf(token) : null;
 
 if (!bot) {
-    console.error("⚠️ Bot obyekti yaratilmadi. Tokenni tekshiring!");
+    console.error("⚠️ Bot obyekti yaratilmadi. Token yoki IDlarni tekshiring!");
 }
 
 // Kichik anti-spam filtri uchun (xotirada)
@@ -43,13 +48,15 @@ if (bot) {
         const userId = ctx.from.id;
         
         try {
-            await bot.telegram.sendMessage(
-                adminId, 
-                `🔔 <b>Yangi foydalanuvchi kirdi!</b>\nBiror odam botingizga kirdi:\n👤 <b>Ism:</b> <a href="tg://user?id=${userId}">${firstName}</a>\n🔗 <b>Username:</b> ${userName}\n🆔 #id${userId}`, 
-                { parse_mode: 'HTML' }
-            );
+            if (isValidAdminId) {
+                await bot.telegram.sendMessage(
+                    adminId, 
+                    `🔔 <b>Yangi foydalanuvchi kirdi!</b>\nBiror odam botingizga kirdi:\n👤 <b>Ism:</b> <a href="tg://user?id=${userId}">${firstName}</a>\n🔗 <b>Username:</b> ${userName}\n🆔 #id${userId}`, 
+                    { parse_mode: 'HTML' }
+                );
+            }
         } catch(e) {
-            console.error(e);
+            console.error("Adminga xabar yuborishda xato:", e.message);
         }
         
         ctx.reply(
