@@ -1,202 +1,143 @@
-require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
-const http = require('http');
+console.log("🚀 STARTUP: Application execution started.");
 
-// --- RENDER.COM HEALTH CHECK SERVER ---
-// Bu qism har doim eng tepada bo'lishi kerak, tokim Render portni tezroq aniqlasin
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is running...\n');
-}).listen(PORT, '0.0.0.0', () => {
-    console.log(`📡 Health-check server port ${PORT} da (0.0.0.0) ishga tushdi.`);
+// --- CRITICAL ERROR HANDLERS ---
+process.on('uncaughtException', (err) => {
+    console.error('🔥 FATAL ERROR (Uncaught Exception):', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 FATAL ERROR (Unhandled Rejection):', reason);
 });
 
-console.log("🎬 Bot ishga tushishni boshladi...");
+const http = require('http');
+// Render odatda 10000 portni kutadi, agar PORT env berilmagan bo'lsa
+const PORT = process.env.PORT || 10000;
+
+// Render Health Check uchun serverni darhol ishga tushiramiz
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot STATUS: OK\n');
+}).listen(PORT, '0.0.0.0', () => {
+    console.log(`📡 HEALTH CHECK: Server is listening on port ${PORT} (interface 0.0.0.0)`);
+});
+
+require('dotenv').config();
+const { Telegraf, Markup } = require('telegraf');
 
 const token = process.env.BOT_TOKEN;
 const adminId = process.env.ADMIN_CHAT_ID;
-
-// Admin ID ni tekshirish (faqat raqamlardan iborat bo'lishi kerak)
 const isValidAdminId = adminId && /^\d+$/.test(adminId);
 
-// Token tekshiruv
+console.log("🛠 CONFIG: Checking environment variables...");
+
 if (!token || token === 'Ushbu_joyga_bot_tokenni_yozing') {
-    console.error("🔴 XATOLIK: BOT_TOKEN topilmadi! Render Dashboard-da Environment Variables bo'limini sozlang.");
+    console.error("🔴 ERROR: BOT_TOKEN is missing or invalid in Environment Variables!");
+} else {
+    console.log("✅ CONFIG: BOT_TOKEN found.");
 }
 
-// Botni yaratish (Token bo'lmasa xato bermasligi uchun tekshiruv bilan)
-const bot = token && token !== 'Ushbu_joyga_bot_tokenni_yozing' ? new Telegraf(token) : null;
-
-if (!bot) {
-    console.error("⚠️ Bot obyekti yaratilmadi. Token yoki IDlarni tekshiring!");
+if (!isValidAdminId) {
+    console.error("🔴 ERROR: ADMIN_CHAT_ID is missing or invalid in Environment Variables!");
+} else {
+    console.log("✅ CONFIG: ADMIN_CHAT_ID found.");
 }
 
-// Kichik anti-spam filtri uchun (xotirada)
-const lastMessageMap = new Map();
+// Bot obyekti
+const bot = (token && token !== 'Ushbu_joyga_bot_tokenni_yozing') ? new Telegraf(token) : null;
 
-// Faqat bot mavjud bo'lsa buyruqlarni o'rnatamiz
 if (bot) {
-    // Boshlang'ich buyruq: /start yuborilganda
+    console.log("🤖 BOT: Initializing commands...");
+    
+    // Antispam map
+    const lastMessageMap = new Map();
+
     bot.start(async (ctx) => {
         const isFromAdmin = ctx.chat.id.toString() === adminId;
 
         if (!isFromAdmin) {
-        // Yangi kirgan foydalanuvchi profilini adminga darhol yuborish
-        const userName = ctx.from.username ? `@${ctx.from.username}` : `Yo'q`;
-        const firstName = ctx.from.first_name || "Mavjud Emas";
-        const userId = ctx.from.id;
-        
-        try {
-            if (isValidAdminId) {
-                await bot.telegram.sendMessage(
-                    adminId, 
-                    `🔔 <b>Yangi foydalanuvchi kirdi!</b>\nBiror odam botingizga kirdi:\n👤 <b>Ism:</b> <a href="tg://user?id=${userId}">${firstName}</a>\n🔗 <b>Username:</b> ${userName}\n🆔 #id${userId}`, 
-                    { parse_mode: 'HTML' }
-                );
-            }
-        } catch(e) {
-            console.error("Adminga xabar yuborishda xato:", e.message);
-        }
-        
-        ctx.reply(
-            `👋 Salom, <b><a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a></b>!\n\n` +
-            `Bu yerda menga xohlagan narsangizni jo'nating: qiziq savollar, hazillar, dardingiz yoki g'iybat bo'lsa ham bo'laveradi!\n\n` +
-            `👇 Matn, rasm, video, stiker yoki ovozli xabar yo'llang. Keling, gaplashamiz! 😄`,
-            { 
-                parse_mode: 'HTML',
-                disable_web_page_preview: true,
-                reply_markup: { remove_keyboard: true } // Mijozda avvalgi tugmalar qolgan bo'lsa tozalaydi
-            }
-        );
-    } else {
-        // Agar bu Admin bo'lsa, unga maxsus Havola tugmasi ko'rsatiladi
-        ctx.reply("👋 Assalomu alaykum, Admin!\nBot quloq qoqmasdan xizmatga tayyor. \n\nPastagi tugma yordamida botga jalb qiluvchi taklif havolasini osongina olasiz.", Markup.keyboard([
-            ['🔗 Taklif havolasi']
-        ]).resize());
-    }
-});
-
-// Admin uchun: O'z kanaliga tarqatishi uchun taklif havolasini olish
-bot.hears('🔗 Taklif havolasi', (ctx) => {
-    // Agar buni adashib oddiy odam yozsa unga javob qaytmasligi uchun to'siq:
-    if (ctx.chat.id.toString() !== adminId) return;
-    
-    // Bot ishga tushgach uning o'z username malumoti saqlanadi
-    const botUser = ctx.botInfo.username;
-    ctx.reply(
-        `Mana botingizning taklif havolasi:\n\n👉 <b>https://t.me/${botUser}</b>\n\nUshbu xabarni nusxalab xohlagan kanalingizga, yoki do'stlaringiz guruhiga yuboring. Odamlar shu havolani bosa botga kirib kelishadi!`,
-        { 
-            parse_mode: 'HTML',
-            disable_web_page_preview: true 
-        }
-    );
-});
-
-
-// --- ASOSIY XABARLARNI BOSHQARISH ---
-bot.on('message', async (ctx, next) => {
-    const isFromAdmin = ctx.chat.id.toString() === adminId;
-
-    // 1) QISM: Agar chat adminniki bo'lsa va u suhbatga javob (reply) berayotgan bo'lsa
-    if (isFromAdmin && ctx.message.reply_to_message) {
-        const replyMsg = ctx.message.reply_to_message;
-        const infoText = replyMsg.text || replyMsg.caption || '';
-        const match = infoText.match(/#id(\d+)/);
-
-        if (match) {
-            const targetUserId = match[1];
+            const userName = ctx.from.username ? `@${ctx.from.username}` : `Yo'q`;
+            const firstName = ctx.from.first_name || "Mavjud Emas";
+            const userId = ctx.from.id;
+            
             try {
-                // Hech qanday reaksiyalarsiz faqat Admin yozgan xabarni yetkizamiz
-                await bot.telegram.sendMessage(targetUserId, `💬 <b>DIQQAT! ADMINDAN JAVOB KELDI:</b>`, { parse_mode: 'HTML' });
-                await ctx.telegram.copyMessage(targetUserId, ctx.chat.id, ctx.message.message_id);
-                
-                // Muvaffaqiyatli qabul qilinganligi haqida admin bildirishnomasi o'chirildi (jim ishlaydi)
+                if (isValidAdminId) {
+                    await bot.telegram.sendMessage(
+                        adminId, 
+                        `🔔 <b>Yangi foydalanuvchi kirdi!</b>\n👤 <b>Ism:</b> <a href="tg://user?id=${userId}">${firstName}</a>\n🔗 <b>Username:</b> ${userName}\n🆔 #id${userId}`, 
+                        { parse_mode: 'HTML' }
+                    );
+                }
             } catch(e) {
-                console.error("Yuborishda xatolik:", e);
-                await ctx.reply("🚫 Xatolik: foydalanuvchi botni bloklagan bo'lishi mumkin.");
+                console.error("Admin notify error:", e.message);
             }
-            return; // Javobni yakunlash
-        }
-    }
-
-    // Agar admin shunchaki guruhda reply qilmasdan o'z-o'zidan yozgan bo'lsa:
-    if (isFromAdmin) return next();
-
-    // 2) QISM: Oddiy foydalanuvchi Adminga savol/xabar yuborsa
-    const userId = ctx.from.id;
-    const now = Date.now();
-
-    // Spam-filtr: bir xabar kelgandan keyin navbatdagisi uchun 3 soniya tanaffus
-    if (lastMessageMap.has(userId) && (now - lastMessageMap.get(userId) < 3000)) {
-        return ctx.reply("⏳ Voooy, juda tezsiz! Iltimos, keyingi xabargacha 3 soniyagina tanaffus qiling.");
-    }
-    lastMessageMap.set(userId, now);
-
-    const userName = ctx.from.username ? `@${ctx.from.username}` : `Yo'q`;
-    const firstName = ctx.from.first_name || "Mavjud Emas";
-    
-    // Foydalanuvchi ma'lumotlari jamlangan shablon (Adminga ko'rsatiladigan sodda forma)
-    const header = `👤 <b>Mijoz:</b> <a href="tg://user?id=${userId}">${firstName}</a>\n` +
-                   `🔗 <b>Username:</b> ${userName}\n` +
-                   `🆔 #id${userId}\n\n`;
-
-    try {
-        if (ctx.message.text) {
-            // Matn bo'lsa, bitta qilib yuboriladi
-            await bot.telegram.sendMessage(adminId, header + `📝 <b>Xabar:</b>\n` + ctx.message.text, { parse_mode: 'HTML' });
-        } 
-        else if (ctx.message.photo || ctx.message.video || ctx.message.document || ctx.message.audio || ctx.message.voice) {
-            // Media (+ caption) bo'lsa
-            const cap = ctx.message.caption || '';
-            await ctx.copyMessage(adminId, {
-                caption: header + (cap ? `📝 ${cap}` : ''),
-                parse_mode: 'HTML'
-            });
-        } 
-        else if (ctx.message.sticker || ctx.message.animation) {
-            // Stiker/GIFlarda format buzilmasligi uchun oldin obyekti tashlab, ostiga kimdanligini yozamiz
-            const mediaMsg = await ctx.copyMessage(adminId);
-            await bot.telegram.sendMessage(adminId, header + `👆 (Yuqoridagi stiker egasi)`, { 
-                parse_mode: 'HTML', 
-                reply_to_message_id: mediaMsg.message_id 
-            });
+            
+            ctx.reply(
+                `👋 Salom, <b><a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a></b>!\n\nMenga xohlagan narsangizni yuboring, adminga yetkaziladi.`,
+                { parse_mode: 'HTML', disable_web_page_preview: true }
+            );
         } else {
-            // Boshqa turdagi xabarlar (Location, Contact)
-            const otherMsg = await ctx.copyMessage(adminId);
-            await bot.telegram.sendMessage(adminId, header + `👆 (Yuqoridagi xabar egasi)`, { 
-                parse_mode: 'HTML',
-                reply_to_message_id: otherMsg.message_id
-            });
+            ctx.reply("👋 Salom Admin!", Markup.keyboard([['🔗 Taklif havolasi']]).resize());
+        }
+    });
+
+    bot.hears('🔗 Taklif havolasi', (ctx) => {
+        if (ctx.chat.id.toString() !== adminId) return;
+        ctx.reply(`Bot havolasi: https://t.me/${ctx.botInfo.username}`);
+    });
+
+    bot.on('message', async (ctx, next) => {
+        const isFromAdmin = ctx.chat.id.toString() === adminId;
+
+        if (isFromAdmin && ctx.message.reply_to_message) {
+            const replyMsg = ctx.message.reply_to_message;
+            const infoText = replyMsg.text || replyMsg.caption || '';
+            const match = infoText.match(/#id(\d+)/);
+
+            if (match) {
+                const targetUserId = match[1];
+                try {
+                    await bot.telegram.sendMessage(targetUserId, `💬 <b>DIQQAT! ADMINDAN JAVOB KELDI:</b>`, { parse_mode: 'HTML' });
+                    await ctx.telegram.copyMessage(targetUserId, ctx.chat.id, ctx.message.message_id);
+                } catch(e) {
+                    await ctx.reply("🚫 Xato: bot bloklangan bo'lishi mumkin.");
+                }
+                return;
+            }
         }
 
-        // Tasdiqlash xabari: Qiziqarli Entertainment varianti
-        const funnyReplies = [
-            "✅ O'q kabi adminga uchib ketdi! Kuting...",
-            "✅ Xabaringiz manzilga yetdi! Uyquda bo'lmasa javob qaytadi.",
-            "✅ Vohha-ha, bu yetib bordi! Endi sabr bilan javob kutamiz 😌",
-            "✅ Ajoyib! Xabaringiz eson-omon adminga yetkazildi. 🚀"
-        ];
-        const randomReply = funnyReplies[Math.floor(Math.random() * funnyReplies.length)];
+        if (isFromAdmin) return next();
 
-        await ctx.reply(randomReply);
+        // User message logic
+        const userId = ctx.from.id;
+        const now = Date.now();
+        if (lastMessageMap.has(userId) && (now - lastMessageMap.get(userId) < 3000)) {
+            return ctx.reply("⏳ Biroz kutib turing...");
+        }
+        lastMessageMap.set(userId, now);
 
-    } catch (err) {
-        console.error(err);
-        ctx.reply("🚫 Uzr, xabar yuborishda texnik xatolik yuz berdi. Balki limitdan oshib ketgandirmiz?");
-    }
-});
+        const userName = ctx.from.username ? `@${ctx.from.username}` : `Yo'q`;
+        const header = `👤 <b>Mijoz:</b> <a href="tg://user?id=${userId}">${ctx.from.first_name}</a>\n🔗 <b>Username:</b> ${userName}\n🆔 #id${userId}\n\n`;
 
-// Kutilmagan xatoliklarni ushlab qolish
-bot.catch((err, ctx) => {
-    console.error(`Xatolik yuz berdi: ${ctx.updateType}`, err);
-});
+        try {
+            if (ctx.message.text) {
+                await bot.telegram.sendMessage(adminId, header + `📝 <b>Xabar:</b>\n` + ctx.message.text, { parse_mode: 'HTML' });
+            } else {
+                await ctx.copyMessage(adminId, { caption: header + (ctx.message.caption || ''), parse_mode: 'HTML' });
+            }
+            await ctx.reply("✅ Yuborildi!");
+        } catch (err) {
+            console.error("Forwarding error:", err.message);
+        }
+    });
 
-bot.launch().then(() => {
-    console.log("🚀 Qiziqarli Savol-Javob boti hamma yangiliklar bilan ishga tushdi!");
-});
+    bot.catch((err) => console.error("Telegraf Error:", err));
 
-// Xavfsiz o'chirish jarayonlari
+    bot.launch()
+        .then(() => console.log("🚀 BOT: Bot is online and polling!"))
+        .catch(err => console.error("🚀 BOT: Launch failed!", err));
+
     process.once('SIGINT', () => bot.stop('SIGINT'));
     process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+} else {
+    console.error("🛑 BOT: Bot could not be started due to configuration issues.");
 }
