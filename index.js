@@ -1,258 +1,177 @@
-require('dotenv').config(); // .env faylidan o'zgaruvchilarni yuklash
-const { Telegraf, Scenes, session, Markup } = require('telegraf');
+require('dotenv').config();
+const { Telegraf, Markup } = require('telegraf');
 
-// .env faylidan token va admin chat id olish
 const token = process.env.BOT_TOKEN;
 const adminId = process.env.ADMIN_CHAT_ID;
 
-// Token tekshiruvi
+// Token tekshiruv
 if (!token || token === 'Ushbu_joyga_bot_tokenni_yozing') {
     console.error("Xatolik: BOT_TOKEN ko'rsatilmagan! Iltimos, .env faylini to'g'rilang.");
     process.exit(1);
 }
 
-// Bot obyekti yaratish
 const bot = new Telegraf(token);
 
-// --- Admin Statistikasi Uchun ---
-// (Bu o'zgaruvchilar vaqtinchalik xotirada saqlanadi. Dastur o'chib yonsa, uzilish bo'lsa nolga tushadi. 
-// Doimiy saqlash uchun Ma'lumotlar bazasi (MongoDB/PostgreSQL) ulash kerak)
-let totalUsers = new Set();
-let totalOrders = 0;
+// Kichik anti-spam filtri uchun (xotirada)
+const lastMessageMap = new Map();
 
-// Botga har bir xabar kelganda foydalanuvchini ro'yxatga oluvchi middleware
-bot.use((ctx, next) => {
-    if (ctx.from) {
-        totalUsers.add(ctx.from.id);
+// Boshlang'ich buyruq: /start yuborilganda
+bot.start(async (ctx) => {
+    const isFromAdmin = ctx.chat.id.toString() === adminId;
+
+    if (!isFromAdmin) {
+        // Yangi kirgan foydalanuvchi profilini adminga darhol yuborish
+        const userName = ctx.from.username ? `@${ctx.from.username}` : `Yo'q`;
+        const firstName = ctx.from.first_name || "Mavjud Emas";
+        const userId = ctx.from.id;
+        
+        try {
+            await bot.telegram.sendMessage(
+                adminId, 
+                `🔔 <b>Yangi foydalanuvchi kirdi!</b>\nBiror odam botingizga kirdi:\n👤 <b>Ism:</b> <a href="tg://user?id=${userId}">${firstName}</a>\n🔗 <b>Username:</b> ${userName}\n🆔 #id${userId}`, 
+                { parse_mode: 'HTML' }
+            );
+        } catch(e) {
+            console.error(e);
+        }
+        
+        ctx.reply(
+            `👋 Salom, <b><a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a></b>!\n\n` +
+            `Bu yerda menga xohlagan narsangizni jo'nating: qiziq savollar, hazillar, dardingiz yoki g'iybat bo'lsa ham bo'laveradi!\n\n` +
+            `👇 Matn, rasm, video, stiker yoki ovozli xabar yo'llang. Keling, gaplashamiz! 😄`,
+            { 
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+                reply_markup: { remove_keyboard: true } // Mijozda avvalgi tugmalar qolgan bo'lsa tozalaydi
+            }
+        );
+    } else {
+        // Agar bu Admin bo'lsa, unga maxsus Havola tugmasi ko'rsatiladi
+        ctx.reply("👋 Assalomu alaykum, Admin!\nBot quloq qoqmasdan xizmatga tayyor. \n\nPastagi tugma yordamida botga jalb qiluvchi taklif havolasini osongina olasiz.", Markup.keyboard([
+            ['🔗 Taklif havolasi']
+        ]).resize());
     }
-    return next();
 });
 
-// --- Buyurtma Qabul Qilish Bosqichlari (Wizard Scene) ---
-const orderWizard = new Scenes.WizardScene(
-    'order-wizard',
+// Admin uchun: O'z kanaliga tarqatishi uchun taklif havolasini olish
+bot.hears('🔗 Taklif havolasi', (ctx) => {
+    // Agar buni adashib oddiy odam yozsa unga javob qaytmasligi uchun to'siq:
+    if (ctx.chat.id.toString() !== adminId) return;
     
-    // 1-qadam: Ismni so'rash
-    (ctx) => {
-        ctx.wizard.state.order = {};
-        
-        // Agar Foydalanuvchi "Buyurtma berish" menyusida o'z xizmatini oldindan tanlab kirgan bo'lsa:
-        if (ctx.wizard.state.serviceName) {
-            ctx.wizard.state.order.service = ctx.wizard.state.serviceName;
-        }
-        
-        ctx.reply("Siz bilan bog'lanishimiz uchun ismingizni kiriting:");
-        return ctx.wizard.next();
-    },
-    
-    // 2-qadam: Kontakt so'rash
-    (ctx) => {
-        if (!ctx.message || !ctx.message.text) return; // matn bo'lmasa qaytarish
-        ctx.wizard.state.order.name = ctx.message.text;
-        ctx.reply("Telefon raqamingizni yuboring (masalan: +998901234567):");
-        return ctx.wizard.next();
-    },
-    
-    // 3-qadam: Xizmat turini so'rash (agar tanlanmagan bo'lsa)
-    (ctx) => {
-        if (!ctx.message || !ctx.message.text) return;
-        ctx.wizard.state.order.phone = ctx.message.text;
-        
-        // Agar xizmat nomi oldindan tanlanmagan bo'lsa ro'yxatni ko'rsatamiz
-        if (!ctx.wizard.state.order.service) {
-            ctx.reply("Sizga qaysi xizmatimiz kerak?", 
-                Markup.keyboard(['Telegram bot', 'Veb-sayt', 'SMM']).oneTime().resize()
-            );
-            return ctx.wizard.next();
-        } else {
-            // Agar oldindan narxlar orqali xizmat tanlangan bo'lsa, to'g'ridan-to'g'ri izohga o'tamiz
-            ctx.reply("Qo'shimcha izoh yoki talablaringiz bormi?");
-            return ctx.wizard.selectStep(4); // 4-indeksdagi funksiyaga sakrash (keyingi funksiyani tashlab o'tish)
-        }
-    },
-    
-    // 4-qadam: Xizmat tanlandi, endi Qo'shimcha Izoh so'rash
-    (ctx) => {
-        if (ctx.message && ctx.message.text) {
-            ctx.wizard.state.order.service = ctx.message.text;
-        }
-        ctx.reply("Qo'shimcha izoh yoki talablaringiz bormi? (Yo'q bo'lsa 'yoq' deb yozishingiz mumkin):", Markup.removeKeyboard());
-        return ctx.wizard.next();
-    },
-    
-    // 5-qadam: Yakunlash va Adminga yuborish
-    async (ctx) => {
-        if (ctx.message && ctx.message.text) {
-            ctx.wizard.state.order.comment = ctx.message.text;
-        }
-        
-        totalOrders++; // Buyurtma sonini 1 taga oshiramiz
-        
-        // Adminga bildirishnoma xabari
-        if (adminId && adminId !== 'Ushbu_joyga_admin_chat_id_yozing') {
-            const username = ctx.from.username ? `@${ctx.from.username}` : 'Mavjud emas';
-            const adminMsg = `🟢 *Yangi buyurtma qabul qilindi!*\n\n` +
-                             `👤 *Ism:* ${ctx.wizard.state.order.name}\n` +
-                             `📞 *Telefon:* ${ctx.wizard.state.order.phone}\n` +
-                             `💼 *Xizmat:* ${ctx.wizard.state.order.service}\n` +
-                             `💬 *Izoh:* ${ctx.wizard.state.order.comment}\n\n` +
-                             `[TG User]: ${username} | Profil Linki: [Link](tg://user?id=${ctx.from.id})`;
-                             
-            // Admin id raqamiga yuboramiz. Xato bo'lsa console'da ko'rsatiladi
-            bot.telegram.sendMessage(adminId, adminMsg, { parse_mode: 'Markdown' })
-                .catch(err => console.log("Adminga xabar yuborishda xatolik yuz berdi. ADMIN_CHAT_ID to'g'riligini tekshiring."));
-        }
-
-        // Mijozga javob
-        await ctx.reply("✅ Buyurtmangiz muvaffaqiyatli qabul qilindi! Tez orada mutaxassislarimiz siz bilan aloqaga chiqishadi.", 
-            mainMenu // Yana asosiy menyuni ochiq qoldiramiz
-        );
-        return ctx.scene.leave(); // Sahnadan chiqish
-    }
-);
-
-// Barcha sahnalarni ro'yxatdan o'tkazish
-const stage = new Scenes.Stage([orderWizard]);
-
-// Session o'chirilmasligi / Telegraf state saqlangishi uchun
-bot.use(session());
-bot.use(stage.middleware());
-
-// --- Bot interfeysi: Tugmalar (Asosiy Menyu) ---
-const mainMenu = Markup.keyboard([
-    ['📋 Xizmatlarimiz', '💰 Narxlar'],
-    ['🛒 Buyurtma berish', '📞 Bog\'lanish'],
-    ['❔ Savollar']
-]).resize(); // Tugmalar ekran o'chamiga moslashishi uchun
-
-// /start komandasi
-bot.start((ctx) => {
+    // Bot ishga tushgach uning o'z username malumoti saqlanadi
+    const botUser = ctx.botInfo.username;
     ctx.reply(
-        `Assalomu alaykum, *${ctx.from.first_name}*! Bizning xizmatlarimiz botiga xush kelibsiz.\n\nQuyidagi bosh menyu orqali kerakli bo'limni tanlashingiz mumkin:`, 
-        {
-            parse_mode: 'Markdown',
-            ...mainMenu
+        `Mana botingizning taklif havolasi:\n\n👉 <b>https://t.me/${botUser}</b>\n\nUshbu xabarni nusxalab xohlagan kanalingizga, yoki do'stlaringiz guruhiga yuboring. Odamlar shu havolani bosa botga kirib kelishadi!`,
+        { 
+            parse_mode: 'HTML',
+            disable_web_page_preview: true 
         }
     );
 });
 
-// /admin komandasi
-bot.command('admin', (ctx) => {
-    // Faqat admin ishlata olishi uchun
-    if (ctx.from.id.toString() !== adminId) {
-        return ctx.reply("Sizda administrator huquqlari yo'q!");
+
+// --- ASOSIY XABARLARNI BOSHQARISH ---
+bot.on('message', async (ctx, next) => {
+    const isFromAdmin = ctx.chat.id.toString() === adminId;
+
+    // 1) QISM: Agar chat adminniki bo'lsa va u suhbatga javob (reply) berayotgan bo'lsa
+    if (isFromAdmin && ctx.message.reply_to_message) {
+        const replyMsg = ctx.message.reply_to_message;
+        const infoText = replyMsg.text || replyMsg.caption || '';
+        const match = infoText.match(/#id(\d+)/);
+
+        if (match) {
+            const targetUserId = match[1];
+            try {
+                // Hech qanday reaksiyalarsiz faqat Admin yozgan xabarni yetkizamiz
+                await bot.telegram.sendMessage(targetUserId, `💬 <b>DIQQAT! ADMINDAN JAVOB KELDI:</b>`, { parse_mode: 'HTML' });
+                await ctx.telegram.copyMessage(targetUserId, ctx.chat.id, ctx.message.message_id);
+                
+                // Muvaffaqiyatli qabul qilinganligi haqida admin bildirishnomasi o'chirildi (jim ishlaydi)
+            } catch(e) {
+                console.error("Yuborishda xatolik:", e);
+                await ctx.reply("🚫 Xatolik: foydalanuvchi botni bloklagan bo'lishi mumkin.");
+            }
+            return; // Javobni yakunlash
+        }
     }
+
+    // Agar admin shunchaki guruhda reply qilmasdan o'z-o'zidan yozgan bo'lsa:
+    if (isFromAdmin) return next();
+
+    // 2) QISM: Oddiy foydalanuvchi Adminga savol/xabar yuborsa
+    const userId = ctx.from.id;
+    const now = Date.now();
+
+    // Spam-filtr: bir xabar kelgandan keyin navbatdagisi uchun 3 soniya tanaffus
+    if (lastMessageMap.has(userId) && (now - lastMessageMap.get(userId) < 3000)) {
+        return ctx.reply("⏳ Voooy, juda tezsiz! Iltimos, keyingi xabargacha 3 soniyagina tanaffus qiling.");
+    }
+    lastMessageMap.set(userId, now);
+
+    const userName = ctx.from.username ? `@${ctx.from.username}` : `Yo'q`;
+    const firstName = ctx.from.first_name || "Mavjud Emas";
     
-    const txt = `📊 *Botning joriy holati (Statistika):*\n\n` +
-                `👥 *Mijozlar soni:* ${totalUsers.size} ta\n` +
-                `🛒 *Jami buyurtmalar:* ${totalOrders} ta\n\n` +
-                `_Izoh: Bot qayta ishga tushirilsa ushbu raqamlar yana noldan boshlanadi._`;
-    ctx.reply(txt, { parse_mode: 'Markdown' });
-});
+    // Foydalanuvchi ma'lumotlari jamlangan shablon (Adminga ko'rsatiladigan sodda forma)
+    const header = `👤 <b>Mijoz:</b> <a href="tg://user?id=${userId}">${firstName}</a>\n` +
+                   `🔗 <b>Username:</b> ${userName}\n` +
+                   `🆔 #id${userId}\n\n`;
 
-// 1. "Xizmatlarimiz" tugmasi hodisasi
-bot.hears('📋 Xizmatlarimiz', (ctx) => {
-    const text = "Biz sizga quyidagi xizmatlarni taklif qilamiz.\nBatafsil ma'lumot olish uchun tugmalarni bosing:";
-    
-    // Xizmatlarning o'zining inline tugmalari
-    const inlineKeyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('🤖 Telegram bot yasash', 'info_bot')],
-        [Markup.button.callback('🌐 Veb-sayt yasash', 'info_web')],
-        [Markup.button.callback('📱 SMM xizmati', 'info_smm')]
-    ]);
-    
-    ctx.reply(text, inlineKeyboard);
-});
+    try {
+        if (ctx.message.text) {
+            // Matn bo'lsa, bitta qilib yuboriladi
+            await bot.telegram.sendMessage(adminId, header + `📝 <b>Xabar:</b>\n` + ctx.message.text, { parse_mode: 'HTML' });
+        } 
+        else if (ctx.message.photo || ctx.message.video || ctx.message.document || ctx.message.audio || ctx.message.voice) {
+            // Media (+ caption) bo'lsa
+            const cap = ctx.message.caption || '';
+            await ctx.copyMessage(adminId, {
+                caption: header + (cap ? `📝 ${cap}` : ''),
+                parse_mode: 'HTML'
+            });
+        } 
+        else if (ctx.message.sticker || ctx.message.animation) {
+            // Stiker/GIFlarda format buzilmasligi uchun oldin obyekti tashlab, ostiga kimdanligini yozamiz
+            const mediaMsg = await ctx.copyMessage(adminId);
+            await bot.telegram.sendMessage(adminId, header + `👆 (Yuqoridagi stiker egasi)`, { 
+                parse_mode: 'HTML', 
+                reply_to_message_id: mediaMsg.message_id 
+            });
+        } else {
+            // Boshqa turdagi xabarlar (Location, Contact)
+            const otherMsg = await ctx.copyMessage(adminId);
+            await bot.telegram.sendMessage(adminId, header + `👆 (Yuqoridagi xabar egasi)`, { 
+                parse_mode: 'HTML',
+                reply_to_message_id: otherMsg.message_id
+            });
+        }
 
-// "Xizmatlarimiz" ichidagi inline tugmalar javoblari
-bot.action('info_bot', (ctx) => {
-    ctx.answerCbQuery(); // Loading (soat belgisi) yo'qolishi uchun
-    ctx.reply("🤖 *Telegram bot yasash*\n\nSizning biznesingiz uchun qulay va zamonaviy bot yasab beramiz. Turli botlarni yaratishimiz mumkin:\n- Do'kon / Dostavka botlari\n- Xizmat sotish botlari\n- Avto-javobger va sun'iy intellekt qo'shilgan botlar", { parse_mode: 'Markdown' });
-});
+        // Tasdiqlash xabari: Qiziqarli Entertainment varianti
+        const funnyReplies = [
+            "✅ O'q kabi adminga uchib ketdi! Kuting...",
+            "✅ Xabaringiz manzilga yetdi! Uyquda bo'lmasa javob qaytadi.",
+            "✅ Vohha-ha, bu yetib bordi! Endi sabr bilan javob kutamiz 😌",
+            "✅ Ajoyib! Xabaringiz eson-omon adminga yetkazildi. 🚀"
+        ];
+        const randomReply = funnyReplies[Math.floor(Math.random() * funnyReplies.length)];
 
-bot.action('info_web', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.reply("🌐 *Veb-sayt yasash*\n\nZamonaviy veb-sayt yasab beramiz:\n- Vizitka va landing saytlar\n- Korporativ saytlar\n- Katta onlayn do'konlar (e-commerce)", { parse_mode: 'Markdown' });
-});
+        await ctx.reply(randomReply);
 
-bot.action('info_smm', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.reply("📱 *SMM xizmati*\n\nIjtimoiy tarmoqlarni sifatli va trendda boshqaramiz:\n- Instagram, Telegram sahifalar yuritamiz\n- Reals va postlar tayyorlaymiz\n- Target reklama yordamida haridorlar jalb qilamiz", { parse_mode: 'Markdown' });
-});
-
-// 2. "Narxlar" tugmasi hodisasi
-bot.hears('💰 Narxlar', (ctx) => {
-    const text = "💎 *Bizning xizmatlar narxi (Boshlang'ich):*\n\n" +
-                 "🤖 Telegram bot yasash: *200 dollardan*\n" +
-                 "🌐 Veb-sayt yasash: *300 dollardan*\n" +
-                 "📱 SMM xizmati: *oyiga 150 dollar*\n\n" +
-                 "Qaysi xizmatni buyurtma qilmoqchisiz?";
-                 
-    const inlineKeyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('🛒 Buyurtma: Telegram Bot', 'order_bot')],
-        [Markup.button.callback('🛒 Buyurtma: Veb-sayt', 'order_web')],
-        [Markup.button.callback('🛒 Buyurtma: SMM', 'order_smm')]
-    ]);
-    
-    ctx.reply(text, { parse_mode: 'Markdown', ...inlineKeyboard });
-});
-
-// "Narxlar" ichidagi "Buyurtma berish" tugmalari hodisasi
-bot.action('order_bot', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.scene.enter('order-wizard', { serviceName: 'Telegram bot' });
-});
-bot.action('order_web', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.scene.enter('order-wizard', { serviceName: 'Veb-sayt' });
-});
-bot.action('order_smm', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.scene.enter('order-wizard', { serviceName: 'SMM' });
-});
-
-// 3. "Buyurtma berish" tugmasi hodisasi (umumiy buyurtma)
-bot.hears('🛒 Buyurtma berish', (ctx) => {
-    ctx.scene.enter('order-wizard');
-});
-
-// 4. "Bog'lanish" tugmasi hodisasi
-bot.hears("📞 Bog'lanish", (ctx) => {
-    const text = `📞 *Biz bilan aloqa ma'lumotlari:*\n\n` +
-                 `✈️ *Telegram administrator:* @username (O'rniga o'z yuzernimingiz yozing)\n` +
-                 `📱 *Telefon raqam:* +998 90 123 45 67\n` +
-                 `🕒 *Ish vaqtimiz:* Dushanba - Juma (09:00 — 18:00)\n`;
-    ctx.reply(text, { parse_mode: 'Markdown' });
-});
-
-// 5. "Savollar" tugmasi hodisasi
-bot.hears('❔ Savollar', (ctx) => {
-    const text = `ℹ️ *Ko'p beriladigan savollar (FAQ):*\n\n` +
-                 `*1. "Loyiha qancha vaqtda tayyor bo'ladi?"*\n` +
-                 `— O'rtacha 3 kundan 14 kungacha ish olib boriladi. Bu topshiriqning murakkabligiga bog'liq.\n\n` +
-                 `*2. "To'lov qanday usulda qabul qilinadi?"*\n` +
-                 `— Buyurtma olinganda 50% miqdorda oldindan to'lov (avans) so'raladi. Qolgan qismi ish muvaffaqiyatli topshirilganidan keyin to'lanadi.\n\n` +
-                 `*3. "Kafolat bormi?"*\n` +
-                 `— Ha. Loyiha tugatilganidan so'ng 30 kun davomida kelib chiquvchi xatoliklarni bepul texnik qo'llab quvvatlash orqali tuzatib beramiz.\n`;
-    ctx.reply(text, { parse_mode: 'Markdown' });
-});
-
-// Qolgan keraksiz matnlarni xendling qilish
-bot.on('text', (ctx) => {
-    // Faqat agar odam state/scenarioda bo'lmasa qisqa javob qaytarish
-    const textIsCommand = ctx.message.text.startsWith('/');
-    if (!textIsCommand) {
-        ctx.reply("Iltimos, pastdagi menyu tugmalaridan foydalaning.", mainMenu);
+    } catch (err) {
+        console.error(err);
+        ctx.reply("🚫 Uzr, xabar yuborishda texnik xatolik yuz berdi. Balki limitdan oshib ketgandirmiz?");
     }
 });
 
-// Botni tarmoqqa ulash
+// Kutilmagan xatoliklarni ushlab qolish
+bot.catch((err, ctx) => {
+    console.error(`Xatolik yuz berdi: ${ctx.updateType}`, err);
+});
+
 bot.launch().then(() => {
-    console.log("🟢 Bot muvaffaqiyatli ishga tushdi va ulanmoqda...");
-}).catch((err) => {
-    console.error("🔴 Bot ishga tushishida xatolik yuz berdi:", err);
+    console.log("🚀 Qiziqarli Savol-Javob boti hamma yangiliklar bilan ishga tushdi!");
 });
 
-// Dastur to'xtatilishini nazorat qilish
+// Xavfsiz o'chirish jarayonlari
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
