@@ -12,6 +12,17 @@ if (!token || token === 'Ushbu_joyga_bot_tokenni_yozing') {
 
 const bot = new Telegraf(token);
 
+// --- RENDER.COM HEALTH CHECK SERVER ---
+// Render bepul tarifida bot o'chib qolmasligi uchun portni tinglash kerak
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is running...\n');
+}).listen(PORT, () => {
+    console.log(`📡 Health-check server port ${PORT} da ishga tushdi.`);
+});
+
 // Kichik anti-spam filtri uchun (xotirada)
 const lastMessageMap = new Map();
 

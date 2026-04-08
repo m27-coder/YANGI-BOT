@@ -34,14 +34,21 @@ Bu loyiha Node.js va Telegraf v4 yordamida yozilgan, ko'ngilochar Savol-Javob (Q
 
 ---
 
-## ☁️ Railway.app orqali 24/7 Deploy qilish
+## ☁️ Render.com orqali 24/7 Deploy qilish (Bepul)
 
-Bu loyiha Railway.app serverida doimiy ishlash uchun `railway.toml` va `nixpacks.toml` fayllari bilan tayyorlab qo'yilgan.
+Bu loyiha Render.com platformasida bepul ishlash uchun sozlangan.
 
 1. Loyihani GitHub-ga yuklang (**Push**).
-2. Railway.app-da yangi loyiha yarating va GitHub omboringizni ulang.
-3. Railway **Variables** bo'limida `BOT_TOKEN` va `ADMIN_CHAT_ID` qiymatlarini qo'shing.
-4. Railway avtomatik ravishda botni ishga tushiradi!
+2. [Render.com](https://render.com) saytiga kiring va **New +** > **Web Service** ni tanlang.
+3. GitHub omboringizni (YANGI-BOT) ulang.
+4. Sozlamalarda quyidagilarni kiriting:
+   - **Environment**: `Node`
+   - **Build Command**: `npm install`
+   - **Start Command**: `node index.js`
+5. **Environment Variables** bo'limida quyidagilarni qo'shing:
+   - `BOT_TOKEN`: Sizning bot tokeningiz.
+   - `ADMIN_CHAT_ID`: Sizning Telegram ID raqamingiz.
+6. **Create Web Service** tugmasini bosing. Done! ✅
 
 Omad yor bo'lsin! 🎭
 
