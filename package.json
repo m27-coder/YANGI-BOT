@@ -4,7 +4,9 @@
   "description": "Telegram sotuv bot nodejs va telegraf orqali",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -13,5 +15,8 @@
   },
   "engines": {
     "node": "20.x"
+  },
+  "devDependencies": {
+    "wrangler": "^4.81.0"
   }
 }
