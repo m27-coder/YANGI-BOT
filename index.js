@@ -1,4 +1,6 @@
+require('dotenv').config();
 console.log("🚀 STARTUP: Application execution started.");
+
 
 // --- CRITICAL ERROR HANDLERS ---
 process.on('uncaughtException', (err) => {
@@ -8,8 +10,9 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('🔥 FATAL ERROR (Unhandled Rejection) at:', promise, 'reason:', reason);
 });
 
-// Portni sozlash (Render uchun 10000 yoki PORT env)
-const PORT = process.env.PORT || 10000;
+// Portni sozlash (Railway/Render uchun PORT env)
+const PORT = process.env.PORT || 8080;
+
 
 // --- EXPRESS SERVER (PORTScan va Health Check uchun) ---
 const express = require('express');
@@ -29,7 +32,8 @@ setInterval(() => {
     console.log(`💎 KEEPALIVE: Service is active at ${new Date().toLocaleTimeString()}`);
 }, 60000);
 
-require('dotenv').config();
+// dotenv already loaded at top
+
 const { Telegraf, Markup } = require('telegraf');
 
 const token = process.env.BOT_TOKEN;
@@ -39,8 +43,9 @@ const isValidAdminId = adminId && /^\d+$/.test(adminId);
 console.log("🛠 CONFIG: Checking environment variables...");
 
 if (!token || token === 'Ushbu_joyga_bot_tokenni_yozing') {
-    console.error("🔴 ERROR: BOT_TOKEN topilmadi! Render-da Environment Variables-ni sozlaganingizga ishonch hosil qiling.");
+    console.error("🔴 ERROR: BOT_TOKEN topilmadi! Railway dashboard-da Environment Variables-ni sozlaganingizga ishonch hosil qiling.");
 }
+
 
 if (!isValidAdminId) {
     console.error("🔴 ERROR: ADMIN_CHAT_ID topilmadi yoki xato!");
